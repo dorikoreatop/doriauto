@@ -95,6 +95,234 @@ end
 -- 실행
 
 task.spawn(sendDetailedWebhook)
-loadstring(game:HttpGet("https://pastefy.app/PntCUC9c/raw", true))()
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
+-- [ 기본 설정 ]
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local VIM = game:GetService("VirtualInputManager")
+local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
 
+local waitingPos = Vector3.new(10960.82, 133.84, 1250.03) 
+local isAutoFarming = false
+local autoSelectDifficulty = false
+local aimbotEnabled = false
+local selectedDifficulty = "쉬운 모드"
+local currentTarget = nil
+local targetIndex = 1 -- 여러 몹 순환을 위한 인덱스
+local followDistance = 7
+local mobDetectionRange = 250 
+
+-- [ UI 생성 ]
+local Window = Rayfield:CreateWindow({
+   Name = "Dori-Hub | King Legacy",
+   LoadingTitle = "Dori-Hub Multi-Target",
+   LoadingSubtitle = "Target Cycling & Black Screen",
+   ConfigurationSaving = { Enabled = false },
+   KeySystem = false,
+   KeybindSource = "RightControl" 
+})
+
+local Tab = Window:CreateTab("Dori-Hub", 4483362458)
+
+Tab:CreateSection("Main Farm Settings")
+
+Tab:CreateToggle({
+   Name = "AUTO FARM START",
+   CurrentValue = false,
+   Flag = "FarmToggle",
+   Callback = function(Value)
+      isAutoFarming = Value
+      if isAutoFarming and player.Character then
+          player.Character.HumanoidRootPart.CFrame = CFrame.new(waitingPos)
+      end
+   end,
+})
+
+Tab:CreateToggle({
+   Name = "Aimbot (에임 고정)",
+   CurrentValue = false,
+   Callback = function(Value) aimbotEnabled = Value end,
+})
+
+Tab:CreateSlider({
+   Name = "Mob Detection Range (사냥 범위)",
+   Range = {100, 1000},
+   Increment = 10,
+   CurrentValue = 250,
+   Callback = function(Value) mobDetectionRange = Value end,
+})
+
+Tab:CreateSlider({
+   Name = "Follow Distance (몹과의 거리)",
+   Range = {1, 30},
+   Increment = 1,
+   CurrentValue = 7,
+   Callback = function(Value) followDistance = Value end,
+})
+
+Tab:CreateSection("Dungeon Force Selection")
+
+Tab:CreateDropdown({
+   Name = "난이도 선택",
+   Options = {"쉬운 모드", "보통 모드", "하드 모드"},
+   CurrentOption = {"쉬운 모드"},
+   Callback = function(Option) selectedDifficulty = Option[1] end,
+})
+
+Tab:CreateToggle({
+   Name = "Auto Force Click (강제 난이도 선택)",
+   CurrentValue = false,
+   Callback = function(Value) autoSelectDifficulty = Value end,
+})
+
+-- [[ 블랙 스크린 기능 재추가 ]] --
+local BlackScreenContainer = Instance.new("ScreenGui")
+BlackScreenContainer.Name = "Dori_Black_Overlay"
+BlackScreenContainer.IgnoreGuiInset = true
+BlackScreenContainer.DisplayOrder = -1 
+BlackScreenContainer.Enabled = false
+BlackScreenContainer.Parent = player.PlayerGui
+
+local BGFrame = Instance.new("Frame", BlackScreenContainer)
+BGFrame.Size = UDim2.new(1, 0, 1, 0)
+BGFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+
+Tab:CreateToggle({
+   Name = "Black Screen (화면 가리기)",
+   CurrentValue = false,
+   Callback = function(Value) BlackScreenContainer.Enabled = Value end,
+})
+
+-- [[ 보조 함수: 키 입력 ]] --
+local function sendKey(key)
+    VIM:SendKeyEvent(true, key, false, game)
+    task.wait(0.01)
+    VIM:SendKeyEvent(false, key, false, game)
+end
+
+-- [[ 로직: 난이도 강제 클릭 (스크롤 절대 없음) ]] --
+task.spawn(function()
+    while true do
+        if autoSelectDifficulty then
+            pcall(function()
+                for _, v in pairs(player.PlayerGui:GetDescendants()) do
+                    if (v:IsA("TextButton") or v:IsA("TextLabel")) and v.Visible then
+                        if string.find(v.Text, selectedDifficulty) then
+                            local targetBtn = v:IsA("TextButton") and v or v:FindFirstAncestorOfClass("TextButton")
+                            if targetBtn then
+                                if getconnections then
+                                    for _, connection in pairs(getconnections(targetBtn.MouseButton1Click)) do
+                                        connection:Fire()
+                                    end
+                                end
+                                local pos, size = targetBtn.AbsolutePosition, targetBtn.AbsoluteSize
+                                VIM:SendMouseButtonEvent(pos.X + size.X/2, pos.Y + size.Y/2 + 36, 0, true, game, 0)
+                                task.wait(0.02)
+                                VIM:SendMouseButtonEvent(pos.X + size.X/2, pos.Y + size.Y/2 + 36, 0, false, game, 0)
+                            end
+                        end
+                    end
+                end
+            end)
+        end
+        task.wait(1)
+    end
+end)
+
+-- [[ 로직: 에임봇 ]] --
+RunService.Heartbeat:Connect(function()
+    if aimbotEnabled and currentTarget and currentTarget:FindFirstChild("HumanoidRootPart") then
+        camera.CFrame = CFrame.new(camera.CFrame.Position, currentTarget.HumanoidRootPart.Position)
+    end
+end)
+
+-- [[ 핵심 수정: 여러 몹 순환 타겟팅 로직 ]] --
+RunService.RenderStepped:Connect(function()
+    if not isAutoFarming then return end
+    local char = player.Character
+    if not (char and char:FindFirstChild("HumanoidRootPart")) then return end
+    local root = char.HumanoidRootPart
+    
+    if char.Humanoid.Health > 0 then
+        local distFromWait = (root.Position - waitingPos).Magnitude
+        if distFromWait < 150 then
+            root.CFrame = CFrame.new(waitingPos)
+            currentTarget = nil
+        else
+            -- 주변 모든 몹 리스트 확보
+            local mobs = {}
+            for _, v in pairs(workspace:GetDescendants()) do
+                if v:IsA("Humanoid") and v.Parent:FindFirstChild("HumanoidRootPart") then
+                    local mchar = v.Parent
+                    if mchar.Name ~= player.Name and not Players:GetPlayerFromCharacter(mchar) and v.Health > 0 then
+                        local dist = (root.Position - mchar.HumanoidRootPart.Position).Magnitude
+                        if dist <= mobDetectionRange then
+                            table.insert(mobs, mchar)
+                        end
+                    end
+                end
+            end
+            
+            -- 순환 타겟팅: 현재 타겟이 없거나 죽으면 다음 몹 선택
+            if #mobs > 0 then
+                if not currentTarget or not currentTarget:FindFirstChild("Humanoid") or currentTarget.Humanoid.Health <= 0 then
+                    targetIndex = (targetIndex % #mobs) + 1
+                    currentTarget = mobs[targetIndex]
+                end
+            else
+                currentTarget = nil
+            end
+
+            if currentTarget and currentTarget:FindFirstChild("HumanoidRootPart") then
+                root.CFrame = CFrame.new(currentTarget.HumanoidRootPart.Position + (currentTarget.HumanoidRootPart.CFrame.LookVector * -followDistance), currentTarget.HumanoidRootPart.Position)
+            end
+        end
+    end
+end)
+
+-- [[ 로직: 평타 및 자동 장착 ]] --
+task.spawn(function()
+    while true do
+        if isAutoFarming and currentTarget then
+            pcall(function()
+                local tool = player.Character:FindFirstChildOfClass("Tool") or player.Backpack:FindFirstChildOfClass("Tool")
+                if tool and tool.Parent ~= player.Character then
+                    player.Character.Humanoid:EquipTool(tool)
+                end
+                
+                if tool then tool:Activate() end
+                VIM:SendMouseButtonEvent(10, 10, 0, true, game, 0)
+                task.wait(0.01)
+                VIM:SendMouseButtonEvent(10, 10, 0, false, game, 0)
+            end)
+        end
+        task.wait(0.05)
+    end
+end)
+
+-- [[ 로직: 스킬 콤보 및 타겟 전환 가속 ]] --
+task.spawn(function()
+    while true do
+        if isAutoFarming and currentTarget then
+            pcall(function()
+                sendKey(Enum.KeyCode.One); task.wait(0.05)
+                sendKey(Enum.KeyCode.Z); sendKey(Enum.KeyCode.X); sendKey(Enum.KeyCode.C); 
+                
+                sendKey(Enum.KeyCode.Two); task.wait(0.05)
+                sendKey(Enum.KeyCode.Z); sendKey(Enum.KeyCode.X); 
+                
+                sendKey(Enum.KeyCode.Three); task.wait(0.05)
+                sendKey(Enum.KeyCode.Z); sendKey(Enum.KeyCode.X); sendKey(Enum.KeyCode.C); 
+                sendKey(Enum.KeyCode.V); sendKey(Enum.KeyCode.E); sendKey(Enum.KeyCode.R)
+                
+                -- 스킬 한 사이클 후 강제로 타겟을 바꿔서 여러 몹을 때리게 함
+                currentTarget = nil 
+            end)
+        end
+        task.wait(0.1)
+    end
+end)
+
+Rayfield:Notify({Title = "Dori-Hub v6.0", Content = "멀티 타겟팅 및 블랙 스크린 활성화", Duration = 3})
