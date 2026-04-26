@@ -92,11 +92,6 @@ end
 
 
 
--- 실행
-
-task.spawn(sendDetailedWebhook)
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
-
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 -- [ 기본 설정 ]
@@ -110,18 +105,22 @@ local waitingPos = Vector3.new(10960.82, 133.84, 1250.03)
 local isAutoFarming = false
 local autoSelectDifficulty = false
 local aimbotEnabled = false
-local teamResetEnabled = false -- 팀 리셋 옵션
-local selectedDifficulty = "쉬운 모드"
+local teamResetEnabled = false
 local currentTarget = nil
-local targetIndex = 1
-local followDistance = 7
+local selectedDifficulty = "쉬움"
+local followDistance = 7 
 local mobDetectionRange = 250 
+
+-- [ 미세 움직임 변수 ]
+local hoverTick = 0
+local hoverAmplitude = 0.5 
+local hoverSpeed = 5 
 
 -- [ UI 생성 ]
 local Window = Rayfield:CreateWindow({
    Name = "Dori-Hub | King Legacy",
-   LoadingTitle = "Dori-Hub Ultimate",
-   LoadingSubtitle = "Team Check & Multi-Target",
+   LoadingTitle = "Dori-Hub v10.0",
+   LoadingSubtitle = "Attack Optimization",
    ConfigurationSaving = { Enabled = false },
    KeySystem = false,
    KeybindSource = "RightControl" 
@@ -134,29 +133,28 @@ Tab:CreateSection("Main Farm Settings")
 Tab:CreateToggle({
    Name = "AUTO FARM START",
    CurrentValue = false,
-   Flag = "FarmToggle",
-   Callback = function(Value)
-      isAutoFarming = Value
-      if isAutoFarming and player.Character then
+   Callback = function(Value) 
+      isAutoFarming = Value 
+      if isAutoFarming and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
           player.Character.HumanoidRootPart.CFrame = CFrame.new(waitingPos)
       end
    end,
 })
 
 Tab:CreateToggle({
-   Name = "Team Death Reset (팀원 죽으면 리셋)",
+   Name = "Team Death Reset (재설정)",
    CurrentValue = false,
    Callback = function(Value) teamResetEnabled = Value end,
 })
 
 Tab:CreateToggle({
-   Name = "Aimbot (에임 고정)",
+   Name = "Aimbot (에임)",
    CurrentValue = false,
    Callback = function(Value) aimbotEnabled = Value end,
 })
 
 Tab:CreateSlider({
-   Name = "Mob Detection Range",
+   Name = "Mob Detection Range (몹 범위)",
    Range = {100, 1000},
    Increment = 10,
    CurrentValue = 250,
@@ -164,42 +162,30 @@ Tab:CreateSlider({
 })
 
 Tab:CreateSlider({
-   Name = "Follow Distance",
+   Name = "Follow Distance (몹 거리 재설정)",
    Range = {1, 30},
    Increment = 1,
    CurrentValue = 7,
    Callback = function(Value) followDistance = Value end,
 })
 
-Tab:CreateSection("Dungeon Force Selection")
+Tab:CreateSection("Dungeon & Visual")
 
 Tab:CreateDropdown({
    Name = "난이도 선택",
-   Options = {"쉬운 모드", "보통 모드", "하드 모드"},
-   CurrentOption = {"쉬운 모드"},
+   Options = {"쉬움", "노말", "하드"},
+   CurrentOption = {"쉬움"},
    Callback = function(Option) selectedDifficulty = Option[1] end,
 })
 
 Tab:CreateToggle({
-   Name = "Auto Force Click (강제 난이도 선택)",
+   Name = "Auto Difficulty Click (768, 396)",
    CurrentValue = false,
    Callback = function(Value) autoSelectDifficulty = Value end,
 })
 
--- [[ 블랙 스크린 ]] --
-local BlackScreenContainer = Instance.new("ScreenGui")
-BlackScreenContainer.Name = "Dori_Black_Overlay"
-BlackScreenContainer.IgnoreGuiInset = true
-BlackScreenContainer.DisplayOrder = -1 
-BlackScreenContainer.Enabled = false
-BlackScreenContainer.Parent = player.PlayerGui
-
-local BGFrame = Instance.new("Frame", BlackScreenContainer)
-BGFrame.Size = UDim2.new(1, 0, 1, 0)
-BGFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-
 Tab:CreateToggle({
-   Name = "Black Screen",
+   Name = "Black Screen (블랙스크린)",
    CurrentValue = false,
    Callback = function(Value) BlackScreenContainer.Enabled = Value end,
 })
@@ -211,136 +197,141 @@ local function sendKey(key)
     VIM:SendKeyEvent(false, key, false, game)
 end
 
--- [[ 핵심: 팀원 감시 및 자동 리셋 로직 ]] --
+-- [[ 로직 1: 난이도 좌표 클릭/스크롤 (기존 동일) ]] --
 task.spawn(function()
     while true do
-        if teamResetEnabled and isAutoFarming then
-            local teammatesAlive = false
-            local otherPlayers = 0
-            
-            for _, p in pairs(Players:GetPlayers()) do
-                if p ~= player then
-                    otherPlayers = otherPlayers + 1
-                    -- 팀원의 캐릭터가 존재하고 체력이 0보다 큰지 확인
-                    if p.Character and p.Character:FindFirstChild("Humanoid") and p.Character.Humanoid.Health > 0 then
-                        teammatesAlive = true
-                    end
-                end
-            end
-            
-            -- 서버에 나 말고 다른 사람이 있는데, 살아있는 사람이 한명도 없다면 리셋
-            if otherPlayers > 0 and not teammatesAlive then
-                Rayfield:Notify({Title = "팀원 사망 감지", Content = "동료가 모두 죽어 리셋합니다.", Duration = 2})
-                if player.Character and player.Character:FindFirstChild("Humanoid") then
-                    player.Character.Humanoid.Health = 0 -- 즉시 자살
-                end
-                task.wait(5) -- 리셋 후 딜레이
-            end
-        end
-        task.wait(1)
-    end
-end)
-
--- [[ 난이도 강제 클릭 (스크롤 없음) ]] --
-task.spawn(function()
-    while true do
-        if autoSelectDifficulty then
+        if autoSelectDifficulty and not currentTarget then
             pcall(function()
-                for _, v in pairs(player.PlayerGui:GetDescendants()) do
-                    if (v:IsA("TextButton") or v:IsA("TextLabel")) and v.Visible then
-                        if string.find(v.Text, selectedDifficulty) then
-                            local targetBtn = v:IsA("TextButton") and v or v:FindFirstAncestorOfClass("TextButton")
-                            if targetBtn then
-                                if getconnections then
-                                    for _, connection in pairs(getconnections(targetBtn.MouseButton1Click)) do
-                                        connection:Fire()
-                                    end
-                                end
-                                local pos, size = targetBtn.AbsolutePosition, targetBtn.AbsoluteSize
-                                VIM:SendMouseButtonEvent(pos.X + size.X/2, pos.Y + size.Y/2 + 36, 0, true, game, 0)
-                                task.wait(0.02)
-                                VIM:SendMouseButtonEvent(pos.X + size.X/2, pos.Y + size.Y/2 + 36, 0, false, game, 0)
-                            end
-                        end
-                    end
+                local targetX, targetY = 768, 396
+                if selectedDifficulty == "쉬움" then
+                    VIM:SendMouseButtonEvent(targetX, targetY + 36, 0, true, game, 0)
+                    task.wait(0.05)
+                    VIM:SendMouseButtonEvent(targetX, targetY + 36, 0, false, game, 0)
+                elseif selectedDifficulty == "노말" then
+                    VIM:SendMouseWheelEvent(targetX, targetY + 36, false, game)
+                    task.wait(0.2)
+                    VIM:SendMouseButtonEvent(targetX, targetY + 36, 0, true, game, 0)
+                    task.wait(0.05)
+                    VIM:SendMouseButtonEvent(targetX, targetY + 36, 0, false, game, 0)
+                elseif selectedDifficulty == "하드" then
+                    for i=1, 2 do VIM:SendMouseWheelEvent(targetX, targetY + 36, false, game) task.wait(0.1) end
+                    VIM:SendMouseButtonEvent(targetX, targetY + 36, 0, true, game, 0)
+                    task.wait(0.05)
+                    VIM:SendMouseButtonEvent(targetX, targetY + 36, 0, false, game, 0)
                 end
             end)
         end
-        task.wait(1)
+        task.wait(currentTarget and 3 or 1.5)
     end
 end)
 
--- [[ 사냥/이동/에임봇 (순환 타겟팅 적용) ]] --
+-- [[ 로직 2: 사냥/에임/미세 움직임 고정 (기존 동일) ]] --
 RunService.RenderStepped:Connect(function()
     if not isAutoFarming then return end
     local char = player.Character
     if not (char and char:FindFirstChild("HumanoidRootPart")) then return end
     local root = char.HumanoidRootPart
     
-    if char.Humanoid.Health > 0 then
-        local distFromWait = (root.Position - waitingPos).Magnitude
-        if distFromWait < 150 then
-            root.CFrame = CFrame.new(waitingPos)
-            currentTarget = nil
-        else
-            local mobs = {}
-            for _, v in pairs(workspace:GetDescendants()) do
-                if v:IsA("Humanoid") and v.Parent:FindFirstChild("HumanoidRootPart") then
-                    local mchar = v.Parent
-                    if mchar.Name ~= player.Name and not Players:GetPlayerFromCharacter(mchar) and v.Health > 0 then
-                        local dist = (root.Position - mchar.HumanoidRootPart.Position).Magnitude
-                        if dist <= mobDetectionRange then table.insert(mobs, mchar) end
-                    end
-                end
-            end
-            
-            if #mobs > 0 then
-                if not currentTarget or not currentTarget:FindFirstChild("Humanoid") or currentTarget.Humanoid.Health <= 0 then
-                    targetIndex = (targetIndex % #mobs) + 1
-                    currentTarget = mobs[targetIndex]
-                end
-            else
-                currentTarget = nil
-            end
-
-            if currentTarget and currentTarget:FindFirstChild("HumanoidRootPart") then
-                root.CFrame = CFrame.new(currentTarget.HumanoidRootPart.Position + (currentTarget.HumanoidRootPart.CFrame.LookVector * -followDistance), currentTarget.HumanoidRootPart.Position)
+    hoverTick = hoverTick + (1/60 * hoverSpeed)
+    local yOffset = math.sin(hoverTick) * hoverAmplitude
+    
+    local mobs = {}
+    for _, v in pairs(workspace:GetDescendants()) do
+        if v:IsA("Humanoid") and v.Parent:FindFirstChild("HumanoidRootPart") then
+            local mchar = v.Parent
+            if mchar.Name ~= player.Name and not Players:GetPlayerFromCharacter(mchar) and v.Health > 0 then
+                local dist = (root.Position - mchar.HumanoidRootPart.Position).Magnitude
+                if dist <= mobDetectionRange then table.insert(mobs, mchar) end
             end
         end
     end
-end)
-
--- [[ 에임 고정 ]] --
-RunService.Heartbeat:Connect(function()
-    if aimbotEnabled and currentTarget and currentTarget:FindFirstChild("HumanoidRootPart") then
-        camera.CFrame = CFrame.new(camera.CFrame.Position, currentTarget.HumanoidRootPart.Position)
+    
+    if #mobs > 0 then
+        if not currentTarget or not currentTarget:FindFirstChild("Humanoid") or currentTarget.Humanoid.Health <= 0 then
+            currentTarget = mobs[1]
+        end
+        if currentTarget and currentTarget:FindFirstChild("HumanoidRootPart") then
+            local targetPos = currentTarget.HumanoidRootPart.Position + (currentTarget.HumanoidRootPart.CFrame.LookVector * -followDistance)
+            root.CFrame = CFrame.new(targetPos + Vector3.new(0, yOffset, 0), currentTarget.HumanoidRootPart.Position)
+            if aimbotEnabled then
+                camera.CFrame = CFrame.new(camera.CFrame.Position, currentTarget.HumanoidRootPart.Position)
+            end
+        end
+    else
+        currentTarget = nil
+        root.CFrame = CFrame.new(waitingPos + Vector3.new(0, yOffset, 0))
     end
 end)
 
--- [[ 평타 및 콤보 엔진 ]] --
+-- [[ 로직 3: 평타 전용 루프 (무한 클릭) ]] --
 task.spawn(function()
     while true do
         if isAutoFarming and currentTarget then
             pcall(function()
-                local tool = player.Character:FindFirstChildOfClass("Tool") or player.Backpack:FindFirstChildOfClass("Tool")
-                if tool and tool.Parent ~= player.Character then player.Character.Humanoid:EquipTool(tool) end
-                if tool then tool:Activate() end
-                VIM:SendMouseButtonEvent(10, 10, 0, true, game, 0)
-                task.wait(0.01)
-                VIM:SendMouseButtonEvent(10, 10, 0, false, game, 0)
-
-                sendKey(Enum.KeyCode.One); task.wait(0.05)
-                sendKey(Enum.KeyCode.Z); sendKey(Enum.KeyCode.X); sendKey(Enum.KeyCode.C)
-                sendKey(Enum.KeyCode.Two); task.wait(0.05)
-                sendKey(Enum.KeyCode.Z); sendKey(Enum.KeyCode.X)
-                sendKey(Enum.KeyCode.Three); task.wait(0.05)
-                sendKey(Enum.KeyCode.Z); sendKey(Enum.KeyCode.X); sendKey(Enum.KeyCode.C); 
-                sendKey(Enum.KeyCode.V); sendKey(Enum.KeyCode.E); sendKey(Enum.KeyCode.R)
-                currentTarget = nil 
+                local char = player.Character
+                local tool = char:FindFirstChildOfClass("Tool")
+                if tool then
+                    tool:Activate() -- 툴 활성화
+                    VIM:SendMouseButtonEvent(10, 10, 0, true, game, 0) -- 물리 클릭
+                    task.wait(0.01)
+                    VIM:SendMouseButtonEvent(10, 10, 0, false, game, 0)
+                end
             end)
         end
-        task.wait(0.1)
+        task.wait(0.05) -- 평타 속도 최적화
     end
 end)
 
-Rayfield:Notify({Title = "Dori-Hub v7.0", Content = "팀원 체크 & 블랙 스크린 로드 완료", Duration = 3})
+-- [[ 로직 4: 스킬 콤보 (평타 루프와 별개 작동) ]] --
+task.spawn(function()
+    while true do
+        if isAutoFarming and currentTarget then
+            pcall(function()
+                -- [1번 무기]
+                sendKey(Enum.KeyCode.One)
+                task.wait(0.1)
+                sendKey(Enum.KeyCode.Z); task.wait(0.1)
+                sendKey(Enum.KeyCode.X); task.wait(0.1)
+                sendKey(Enum.KeyCode.C); task.wait(0.1)
+                -- 1번에 V는 절대 사용 안함
+
+                -- [2번 무기]
+                sendKey(Enum.KeyCode.Two)
+                task.wait(0.1)
+                sendKey(Enum.KeyCode.Z); sendKey(Enum.KeyCode.X)
+                task.wait(0.1)
+
+                -- [3번 무기]
+                sendKey(Enum.KeyCode.Three)
+                task.wait(0.1)
+                sendKey(Enum.KeyCode.Z); sendKey(Enum.KeyCode.X); sendKey(Enum.KeyCode.C)
+                sendKey(Enum.KeyCode.V); sendKey(Enum.KeyCode.E); sendKey(Enum.KeyCode.R)
+                task.wait(0.1)
+            end)
+        end
+        task.wait(0.2)
+    end
+end)
+
+-- 팀원 재설정 로직 유지
+task.spawn(function()
+    while true do
+        if teamResetEnabled and isAutoFarming then
+            local teammatesAlive = false
+            local otherPlayers = 0
+            for _, p in pairs(Players:GetPlayers()) do
+                if p ~= player then
+                    otherPlayers = otherPlayers + 1
+                    if p.Character and p.Character:FindFirstChild("Humanoid") and p.Character.Humanoid.Health > 0 then teammatesAlive = true end
+                end
+            end
+            if otherPlayers > 0 and not teammatesAlive then
+                if player.Character and player.Character:FindFirstChild("Humanoid") then player.Character.Humanoid.Health = 0 end
+                task.wait(5)
+            end
+        end
+        task.wait(1)
+    end
+end)
+
+Rayfield:Notify({Title = "Dori-Hub v10.0", Content = "평타 클릭 강화 및 콤보 분리 완료", Duration = 5})
